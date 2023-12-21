@@ -48,6 +48,7 @@ interface IParseCompletion {
 //const URI_TOKENIZE = "http://localhost:5096/api/v1/content/tokenize"
 const URI_CHUNK = "api/v1/content/split"
 const URI_LOAD = "api/v1/content/load"
+const URI_COMPLETION = "api/v1/content/completion"
 
 function App() {
   const [settings, setSettings] = makePersisted(createSignal<ISettings>(DefaultSettings))
@@ -56,26 +57,33 @@ function App() {
   const [tokensContext, setTokensContext] = createSignal(0)
   const [tokensPrompt, setTokensPrompt] = createSignal(0)
   const [parseCompletion, setParseCompletion] = createSignal<IParseCompletion>({ chunks: [] })
-  const [chunkText, setChunkText] = createSignal('')
+  const [context, setContext] = createSignal('')
+  const [completion, setCompletion] = createSignal('')
 
-  const getTokenCountAfterTyping = async (text: string) => {
-    setText(text)
-    setTokens((encode(text)).length);
-    // const payload = {
-    //   text
-    // }
-    // try {
-    //   const resp = await axios.post(URI_TOKENIZE, payload)
-    //   const tokenCount = (encode(text)).length
-    //   setTokens(resp.data.count);
-    // } catch (err) {
-    //   console.error(err)
-    // }
+  const getTokenCountAfterTyping = (text: string, control: string) => {
+    if (control === "chunk") {
+      setText(text)
+      setTokens((encode(text)).length);
+    }
+    if (control === "context") {
+      setContext(text)
+      setTokensContext(encode(text).length);
+    }
+    if (control === "prompt") {
+      setSettings({ ...settings(), prompt: text })
+      setTokensPrompt((encode(text + context())).length);
+    }
+  }
+
+  const UpdateTokenCounts = () => {
+    setTokens((encode(text())).length);
+    setTokensPrompt((encode(settings().prompt + context())).length);
+    setTokensContext(encode(context()).length);
   }
 
   const Process = async () => {
     setParseCompletion({ chunks: [] })
-    getTokenCountAfterTyping(text())
+    getTokenCountAfterTyping(text(), "chunk")
     const maxTokensPerParagraph = settings().method == SplitMethod.Paragraph ? parseInt(settings().wordCount) : parseInt(settings().maxTokensPerLine)
     const payload = {
       text: text(),
@@ -88,7 +96,7 @@ function App() {
       const resp = await axios.post(URI_CHUNK, payload)
       const data: IParseCompletion = resp.data
       console.info(data)
-      setParseCompletion(data);
+      setParseCompletion(data)
       const totalChunks = parseInt(settings().chunks)
       if (totalChunks > 0 && data.chunks.length > 0) {
         let chunkText = ""
@@ -96,8 +104,9 @@ function App() {
           if (i == data.chunks.length) break;
           chunkText += data.chunks[i].text + "\n\n"
         }
-        setChunkText(chunkText)
+        setContext(chunkText)
       }
+      UpdateTokenCounts()
     } catch (err) {
       console.error(err)
     }
@@ -109,8 +118,8 @@ function App() {
     try {
       const resp = await axios.post(URI_LOAD, payload)
       const content = resp.data.content;
-      setTokens((encode(content)).length);
       setText(content)
+      UpdateTokenCounts()
     } catch (err) {
       console.error(err)
     } finally {
@@ -118,10 +127,25 @@ function App() {
     }
   }
 
+  const Submit = async () => {
+    const payload = {
+      prompt: settings().prompt + "\n\n" + context(),
+      max_tokens: parseInt(settings().max_tokens),
+      temperature: parseFloat(settings().temperature)
+    }
+    try {
+      const resp = await axios.post(URI_COMPLETION, payload)
+      const data = resp.data
+      setCompletion(data.text)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
   return (
     <>
       <nav class="p-2 bg-purple-950 text-white font-bold">
-        <h1 class="text-lg">GPT Tokenizer Playground</h1>
+        <h1 class="text-lg">GPT Tokenizer & Chunking Playground</h1>
       </nav>
 
       <nav class="flex flex-row flex-wrap space-x-2 p-2 bg-purple-800 text-white">
@@ -138,6 +162,18 @@ function App() {
       </nav>
       <div class="flex flex-row flex-wrap p-3">
         <div class="flex flex-col w-full md:w-3/4 p-2 space-y-2">
+          <div class="p-2 bg-yellow-100">
+            <p>This tool helps to understand tokens, text chunking, setting context in a Prompt, and to gage the quality of a response based on different chunking settings for a document. To use this tool:</p>
+            <div class="p-2">
+              <ul>
+                <li>- First paste the document content into the <strong>INPUT TEXT</strong> area, set the chunking method and sizes, and then click the <strong>Chunk</strong> button.</li>
+                <li>- The document will be split into chunks and displayed to the right.</li>
+                <li>- Chunks will be added to the <strong>ADDITIONAL CONTEXT</strong> area based on the Chunk limit.</li>
+                <li>- Enter the prompt, max tokens, and temperature, then click the <strong>Submit</strong> button. The additional context will be added to the prompt automatically.</li>
+                <li>- The response will be displayed in the <strong>COMPLETION</strong> area.</li>
+              </ul>
+            </div>
+          </div>
           <div>
             <div class="bg-slate-900 p-1 text-white space-x-2">
               <label class="font-bold uppercase">Input Text:</label>
@@ -211,7 +247,7 @@ function App() {
           <textarea
             class="border border-black p-2 round-lg"
             value={text()}
-            onInput={(e) => { getTokenCountAfterTyping(e.currentTarget.value) }}
+            onInput={(e) => { getTokenCountAfterTyping(e.currentTarget.value, "chunk") }}
             rows={10}></textarea>
           <div>
             <div class="bg-slate-900 p-1 text-white space-x-2">
@@ -229,8 +265,8 @@ function App() {
           <button class="p-2 w-20 bg-purple-950 text-white">Load</button>
           <textarea
             class="border border-black p-2 round-lg"
-            value={chunkText()}
-            onInput={(e) => setChunkText(e.currentTarget.value)}
+            value={context()}
+            onInput={(e) => getTokenCountAfterTyping(e.currentTarget.value, "context")}
             rows={10}></textarea>
           <div>
             <div class="bg-slate-900 text-white p-1 space-x-2">
@@ -250,17 +286,20 @@ function App() {
               />
             </div>
           </div>
-          <button class="p-2 w-20 bg-purple-950 text-white">Submit</button>
+          <button class="p-2 w-20 bg-purple-950 text-white"
+            onclick={Submit}
+          >Submit</button>
           <textarea
             class="border border-black p-2 round-lg"
             value={settings().prompt}
-            onInput={(e) => setSettings({ ...settings(), prompt: e.currentTarget.value })}
+            onInput={(e) => getTokenCountAfterTyping(e.currentTarget.value, "prompt")}
             rows={5}></textarea>
           <div class="bg-slate-900 p-1 text-white">
             <label class='font-bold uppercase'>Completion</label>
           </div>
           <textarea
             readOnly
+            value={completion()}
             class="border bg-slate-200 border-black p-2 round-lg"
             rows={10}></textarea>
           {/* <button

@@ -1,9 +1,21 @@
 using backend.Models;
 using backend.Services;
 using Microsoft.AspNetCore.Mvc;
+using Azure.AI.OpenAI;
+using Azure;
+using dotenv.net;
 
+DotEnv.Load();
 
 var builder = WebApplication.CreateBuilder(args);
+
+var api_URI = Environment.GetEnvironmentVariable("OPENAI_API_URI")!;
+var api_key = Environment.GetEnvironmentVariable("OPENAI_API_KEY")!;
+var api_model = Environment.GetEnvironmentVariable("OPENAI_API_GPT")!;
+
+Uri azureOpenAIResourceUri = new(api_URI);
+AzureKeyCredential azureOpenAIApiKey = new(api_key);
+OpenAIClient client = new(azureOpenAIResourceUri, azureOpenAIApiKey);
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -113,8 +125,39 @@ group.MapPost("/load", async ([FromBody] UrlFileRequest request, HttpClient clie
 .WithName("PostLoad")
 .WithOpenApi();
 
+
+group.MapPost("/completion", async ([FromBody] CompletionRequest request) =>
+{
+    if (string.IsNullOrEmpty(request.prompt))
+    {
+        return Results.BadRequest(new { message = "Prompt cannot be empty" });
+    }
+
+    var chatCompletionsOptions = new ChatCompletionsOptions()
+    {
+        DeploymentName = api_model, // Use DeploymentName for "model" with non-Azure clients
+        Messages =
+        {
+            // User messages represent current or historical input from the end user
+            new ChatRequestUserMessage(request.prompt),
+        },
+        MaxTokens = request.max_tokens,
+        Temperature = request.temperature
+    };
+    Response<ChatCompletions> response = await client.GetChatCompletionsAsync(chatCompletionsOptions);
+    ChatResponseMessage responseMessage = response.Value.Choices[0].Message;
+    return Results.Ok(new CompletionResponse(responseMessage.Content));
+})
+.Produces<UrlFileResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.WithName("PostCompletion")
+.WithOpenApi();
+
 //app.MapControllers();
 app.UseStaticFiles();
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+record CompletionRequest(string prompt, int max_tokens = 500, float temperature = 0.3f);
+record CompletionResponse(string text);
