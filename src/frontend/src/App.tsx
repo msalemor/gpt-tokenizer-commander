@@ -59,6 +59,8 @@ function App() {
   const [parseCompletion, setParseCompletion] = createSignal<IParseCompletion>({ chunks: [] })
   const [context, setContext] = createSignal('')
   const [completion, setCompletion] = createSignal('')
+  const [processing, setProcessing] = createSignal(false)
+  const [submitLabel, setSubmitLabel] = createSignal("Submit")
 
   const getTokenCountAfterTyping = (text: string, control: string) => {
     if (control === "chunk") {
@@ -128,17 +130,23 @@ function App() {
   }
 
   const Submit = async () => {
+    if (processing()) return
     const payload = {
       prompt: settings().prompt + "\n\n" + context(),
       max_tokens: parseInt(settings().max_tokens),
       temperature: parseFloat(settings().temperature)
     }
     try {
+      setProcessing(true)
+      setSubmitLabel("Busy...")
       const resp = await axios.post(URI_COMPLETION, payload)
       const data = resp.data
       setCompletion(data.text)
     } catch (err) {
       console.error(err)
+    } finally {
+      setProcessing(false)
+      setSubmitLabel("Submit")
     }
   }
 
@@ -286,9 +294,9 @@ function App() {
               />
             </div>
           </div>
-          <button class="p-2 w-20 bg-purple-950 text-white"
+          <button class="p-2 w-24 bg-purple-950 text-white"
             onclick={Submit}
-          >Submit</button>
+          >{submitLabel()}</button>
           <textarea
             class="border border-black p-2 round-lg"
             value={settings().prompt}
