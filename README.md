@@ -12,7 +12,7 @@ This is a tool designed to help understand several foundational model concepts w
 
 ## Chunking methods
 
-- Tokenizer: Use the SK splitter, but override the token counter with a tiktoken token counter
+- Tokenizer: Use the SK splitter, but override the token counter with a Tiktoken token counter
 - SK Default: Use the default SK splitter and counter
 - Paragraph: Break by paragraphs `\n\n`
 - Paragraph words: Break by paragraphs and words. Allow a chunk to be longer than the requested amount until the end of the next paragraph.
@@ -35,10 +35,11 @@ Backend
 
 ## Running locally
 
+- Install the dependencies with `cd src\frontend && npm install or bun install`
 - Create a `.env` file in the `src\backend` folder
 - At the project's root folder type: 'make run'
 
-**Note:** the equivalent `Makefile` commands by hand are:
+**Note:** The equivalent `Makefile` commands by hand are:
 
 ```bash
 rm -rf src/backend/wwwroot
