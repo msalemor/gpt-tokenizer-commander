@@ -14,7 +14,7 @@ run: build-ui
 	@echo "Run"
 	cd src/backend && dotnet watch run
 
-TAG=0.0.1
+TAG=0.0.4v1
 docker: build-ui
 	@echo "Docker"
 	cd src/backend && docker build . -t am8850/gptchunker:$(TAG)

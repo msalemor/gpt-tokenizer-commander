@@ -2,21 +2,11 @@ import axios from "axios"
 import { For, createSignal } from "solid-js"
 import { encode } from 'gpt-tokenizer'
 import { makePersisted } from "@solid-primitives/storage"
+import { sample, samplePrompt } from "./components"
+import { Header } from "./components/Header"
+import { Information } from "./components/Information"
 
-interface ISettings {
-  maxTokensPerLine: string
-  maxTokensPerParagraph: string
-  overlapTokens: string
-  wordCount: string
-  method: string
-  chunks: string
-  prompt: string
-  max_tokens: string
-  temperature: string
-  url: string
-}
-
-const SplitMethod = {
+const SplittingMethod = {
   SK: "SK",
   SKTIKTOKEN: "SKTiktoken",
   Paragraph: "Paragraph",
@@ -28,7 +18,7 @@ const DefaultSettings: ISettings = {
   maxTokensPerParagraph: "1024",
   overlapTokens: "0",
   wordCount: "512",
-  method: SplitMethod.SK,
+  method: SplittingMethod.SKTIKTOKEN,
   chunks: "3",
   prompt: "",
   max_tokens: "500",
@@ -36,19 +26,22 @@ const DefaultSettings: ISettings = {
   url: ""
 }
 
-interface IChunk {
-  text: string
-  tokenCount: number
+interface IEndpoint {
+  uri: string
+  key: string
+  model: string
 }
 
-interface IParseCompletion {
-  chunks: IChunk[]
+const DefaultEndpoint: IEndpoint = {
+  uri: "",
+  key: "",
+  model: ""
 }
 
-//const URI_TOKENIZE = "http://localhost:5096/api/v1/content/tokenize"
 const URI_CHUNK = "api/v1/content/split"
 const URI_LOAD = "api/v1/content/load"
 const URI_COMPLETION = "api/v1/content/completion"
+const URI_CONFIGURATION = "api/v1/content/reconfigure"
 
 function App() {
   const [settings, setSettings] = makePersisted(createSignal<ISettings>(DefaultSettings))
@@ -56,11 +49,15 @@ function App() {
   const [tokens, setTokens] = createSignal(0)
   const [tokensContext, setTokensContext] = createSignal(0)
   const [tokensPrompt, setTokensPrompt] = createSignal(0)
+  const [tokensCompletion, setTokensCompletion] = createSignal(0)
   const [parseCompletion, setParseCompletion] = createSignal<IParseCompletion>({ chunks: [] })
   const [context, setContext] = createSignal('')
   const [completion, setCompletion] = createSignal('')
   const [processing, setProcessing] = createSignal(false)
   const [submitLabel, setSubmitLabel] = createSignal("Submit")
+  const [useContext, _] = createSignal(true)
+  const [tab, setTab] = createSignal('chunk')
+  const [endpoint, setEndpoint] = createSignal<IEndpoint>(DefaultEndpoint)
 
   const getTokenCountAfterTyping = (text: string, control: string) => {
     if (control === "chunk") {
@@ -81,12 +78,29 @@ function App() {
     setTokens((encode(text())).length);
     setTokensPrompt((encode(settings().prompt + context())).length);
     setTokensContext(encode(context()).length);
+    setTokensCompletion(encode(completion()).length);
+  }
+
+  const LoadContext = () => {
+    const totalChunks = parseInt(settings().chunks)
+    const chunks = parseCompletion().chunks
+    if (totalChunks > 0 && parseCompletion().chunks.length > 0) {
+      let chunkText = ""
+      for (let i = 0; i < totalChunks; i++) {
+        if (i == chunks.length) break;
+        chunkText += chunks[i].text + "\n\n"
+      }
+      setContext(chunkText)
+      UpdateTokenCounts()
+    }
   }
 
   const Process = async () => {
+    if (processing()) return
+    setProcessing(true)
     setParseCompletion({ chunks: [] })
     getTokenCountAfterTyping(text(), "chunk")
-    const maxTokensPerParagraph = settings().method == SplitMethod.Paragraph ? parseInt(settings().wordCount) : parseInt(settings().maxTokensPerLine)
+    const maxTokensPerParagraph = settings().method == SplittingMethod.Paragraph ? parseInt(settings().wordCount) : parseInt(settings().maxTokensPerLine)
     const payload = {
       text: text(),
       maxTokensPerLine: parseInt(settings().maxTokensPerLine),
@@ -99,22 +113,53 @@ function App() {
       const data: IParseCompletion = resp.data
       console.info(data)
       setParseCompletion(data)
-      const totalChunks = parseInt(settings().chunks)
-      if (totalChunks > 0 && data.chunks.length > 0) {
-        let chunkText = ""
-        for (let i = 0; i < totalChunks; i++) {
-          if (i == data.chunks.length) break;
-          chunkText += data.chunks[i].text + "\n\n"
-        }
-        setContext(chunkText)
-      }
+      LoadContext()
       UpdateTokenCounts()
+      setTab("context")
     } catch (err) {
       console.error(err)
+    } finally {
+      setProcessing(false)
     }
   }
 
+  const SetEndpoint = async () => {
+    if (processing()) return
+    if (endpoint().uri === "" || endpoint().key === "") return
+    try {
+      setProcessing(true)
+      const payload = {
+        uri: endpoint().uri,
+        key: endpoint().key,
+        model: endpoint().model
+      }
+      await axios.post(URI_CONFIGURATION, payload)
+      alert("Configuration saved")
+      //setEndpoint({ ...endpoint(), uri: "", key: "", model: "" })
+    }
+    catch (err) {
+      console.error(err)
+    }
+    finally {
+      setProcessing(false)
+    }
+
+  }
+
+  const LoadAndProcess = async () => {
+    if (processing()) return
+    setText(sample)
+    await Process()
+  }
+
+  const LoadSamplePrompt = () => {
+    setSettings({ ...settings(), prompt: samplePrompt })
+    UpdateTokenCounts()
+  }
+
   const LoadFile = async () => {
+    if (processing()) return
+    setProcessing(true)
     const payload = { url: settings().url }
     setSettings({ ...settings(), url: "Loading ..." })
     try {
@@ -126,22 +171,38 @@ function App() {
       console.error(err)
     } finally {
       setSettings({ ...settings(), url: "" })
+      setProcessing(false)
     }
   }
 
   const Submit = async () => {
     if (processing()) return
+    // Use a template form
+    let prompt = settings().prompt
+    if (prompt.indexOf("<CONTEXT>") > -1) {
+      prompt = prompt.replace("<CONTEXT>", context())
+    } else {
+      prompt = prompt + "\n\n" + context()
+    }
+    // Maybe the user decides not to use the context
+    if (!useContext()) {
+      prompt = settings().prompt
+    }
     const payload = {
-      prompt: settings().prompt + "\n\n" + context(),
+      prompt,
       max_tokens: parseInt(settings().max_tokens),
       temperature: parseFloat(settings().temperature)
     }
+    console.info(`Submit: ${JSON.stringify(payload)}`)
+    setProcessing(true)
     try {
-      setProcessing(true)
       setSubmitLabel("Busy...")
       const resp = await axios.post(URI_COMPLETION, payload)
       const data = resp.data
+      console.info(`Completion: ${JSON.stringify(data)}`)
       setCompletion(data.text)
+      setTab("completion")
+      UpdateTokenCounts()
     } catch (err) {
       console.error(err)
     } finally {
@@ -152,95 +213,134 @@ function App() {
 
   return (
     <>
-      <nav class="p-2 bg-purple-950 text-white font-bold">
-        <h1 class="text-lg">GPT Tokenizer & Chunking Playground</h1>
-      </nav>
+      <Header />
 
-      <nav class="flex flex-row flex-wrap space-x-2 p-2 bg-purple-800 text-white">
+      <div class="bg-blue-900 text-white p-2 flex flex-row flex-wrap space-x-2 space-y-2 items-center">
+
+        <div class='space-x-2'>
+          <label>OpenAI</label>
+          <label>URI:</label>
+          <input
+            value={endpoint().uri}
+            onInput={(e) => setEndpoint({ ...endpoint(), uri: e.currentTarget.value })}
+            type="text" class='px-1 w-52 text-black' />
+        </div>
+        <div class='space-x-2'>
+          <label>API Key:</label>
+          <input
+            value={endpoint().key}
+            onInput={(e) => setEndpoint({ ...endpoint(), key: e.currentTarget.value })}
+            type="password" class='px-1 w-40 text-black' />
+        </div>
+        <div class='space-x-2'>
+          <label>Deployment Name:</label>
+          <input
+            value={endpoint().model}
+            onInput={(e) => setEndpoint({ ...endpoint(), model: e.currentTarget.value })}
+            type="text" class='px-1 w-24 text-black' />
+        </div>
+        <button
+          onclick={SetEndpoint}
+          class='p-2 bg-green-800 hover:bg-green-700 font-semibold'>
+          Configure
+        </button>
+      </div>
+
+      <nav class="flex flex-row flex-wrap space-x-2 p-2 bg-blue-900 text-white">
         <div class="space-x-2 space-y-2">
           <label>Document URL:</label>
           <input
             value={settings().url}
             onInput={(e) => setSettings({ ...settings(), url: e.currentTarget.value })}
-            class="px-1 w-[500px] text-black" type="text" />
+            class="px-1 md:w-[500px] w-[90%] text-black" type="text" />
           <button
             onClick={LoadFile}
-            class="p-2 bg-green-800 hover:bg-green-700 font-semibold rounded">Load</button>
+            class="p-2 bg-green-800 hover:bg-green-700 font-semibold">Load</button>
         </div>
       </nav>
-      <div class="flex flex-row flex-wrap p-3">
-        <div class="flex flex-col w-full md:w-3/4 p-2 space-y-2">
-          <div class="p-2 bg-yellow-100">
-            <p>This tool helps to understand tokens, text chunking, setting context in a Prompt, and to gage the quality of a response based on different chunking settings for a document. To use this tool:</p>
-            <div class="p-2">
-              <ul>
-                <li>- First paste the document content into the <strong>INPUT TEXT</strong> area, set the chunking method and sizes, and then click the <strong>Chunk</strong> button.</li>
-                <li>- The document will be split into chunks and displayed to the right.</li>
-                <li>- Chunks will be added to the <strong>ADDITIONAL CONTEXT</strong> area based on the Chunk limit.</li>
-                <li>- Enter the prompt, max tokens, and temperature, then click the <strong>Submit</strong> button. The additional context will be added to the prompt automatically.</li>
-                <li>- The response will be displayed in the <strong>COMPLETION</strong> area.</li>
-              </ul>
-            </div>
-          </div>
-          <div>
-            <div class="bg-slate-900 p-1 text-white space-x-2">
-              <label class="font-bold uppercase">Input Text:</label>
-              <span title="Total Tokens" class='px-2 bg-purple-900 text-white rounded-xl'>{tokens()}</span>
-            </div>
-            <div class="flex flex-row flex-wrap space-x-2 p-2 bg-purple-900 text-white">
+
+      <div class="px-3 mt-3">
+        <nav class="flex flex-row w-full flex-wrap space-x-[2px]">
+          <button
+            onClick={() => setTab("chunk")}
+            class={`p-2 hover:underline hover:text-black ${tab() == "chunk" ? "border-black border-2 underline text-black" : "border"} font-semibold`}>Text&nbsp;
+            <span title="Total Tokens" class='px-2 bg-blue-900 text-white rounded-xl'>{tokens()}</span>
+          </button>
+          <button
+            onClick={() => setTab("context")}
+            class={`p-2 hover:underline hover:text-black ${tab() == "context" ? "border-black border-2 underline text-black" : "border"} font-semibold`}>Context&nbsp;
+            <span title="Total Tokens" class='px-2 bg-blue-900 text-white rounded-xl'>{tokensContext()}</span>
+          </button>
+          <button
+            onClick={() => setTab("prompt")}
+            class={`p-2 hover:underline hover:text-black ${tab() == "prompt" ? "border-black border-2 underline text-black" : "border"} font-semibold`}>Prompt&nbsp;
+            <span title="Total Tokens" class='px-2 bg-blue-900 text-white rounded-xl'>{tokensPrompt()}</span>
+          </button>
+          <button
+            onClick={() => setTab("completion")}
+            class={`p-2 hover:underline hover:text-black ${tab() == "completion" ? "border-black border-2 underline text-black" : "border"} font-semibold`}>Completion&nbsp;
+            <span title="Total Tokens" class='px-2 bg-blue-900 text-white rounded-xl'>{tokensCompletion()}</span>
+          </button>
+        </nav>
+      </div>
+      <div class="px-3 flex flex-row flex-wrap w-full">
+        <div class="basis-full md:basis-3/4 border border-black">
+          {/* Input Text */}
+          <section hidden={tab() !== "chunk"}>
+            <div class="flex flex-row flex-wrap space-x-2 p-2 bg-blue-900 text-white">
               <label>Method:</label>
               <div class="space-x-2">
                 <input type='radio' name="method"
-                  checked={settings().method === SplitMethod.SKTIKTOKEN}
+                  checked={settings().method === SplittingMethod.SKTIKTOKEN}
                   onInput={(e) => setSettings({ ...settings(), method: e.currentTarget.value })}
-                  value={SplitMethod.SKTIKTOKEN} />
-                <label>SK/GPT Encoder</label>
+                  value={SplittingMethod.SKTIKTOKEN} />
+                <label>Tokens</label>
               </div>
               <div class="space-x-2">
                 <input type='radio' name="method"
-                  checked={settings().method === SplitMethod.SK}
+                  checked={settings().method === SplittingMethod.SK}
                   onInput={(e) => setSettings({ ...settings(), method: e.currentTarget.value })}
-                  value={SplitMethod.SK} />
-                <label>SK Default</label>
+                  value={SplittingMethod.SK} />
+                <label>SK Counter</label>
               </div>
               <div class="space-x-2">
                 <input type='radio' name="method"
-                  checked={settings().method === SplitMethod.Paragraph}
+                  checked={settings().method === SplittingMethod.Paragraph}
                   onInput={(e) => setSettings({ ...settings(), method: e.currentTarget.value })}
-                  value={SplitMethod.Paragraph} />
+                  value={SplittingMethod.Paragraph} />
                 <label>Paragraphs</label>
               </div>
               <div class="space-x-2">
                 <input type='radio' name="method"
-                  checked={settings().method === SplitMethod.ParagraphWords}
+                  checked={settings().method === SplittingMethod.ParagraphWords}
                   onInput={(e) => setSettings({ ...settings(), method: e.currentTarget.value })}
-                  value={SplitMethod.ParagraphWords} />
+                  value={SplittingMethod.ParagraphWords} />
                 <label>Paragraph/Words</label>
               </div>
             </div>
-            <div class="flex flex-row flex-wrap space-x-2 p-2 bg-purple-900 text-white">
-              <div class={"space-x-2"} hidden={settings().method == SplitMethod.Paragraph || settings().method == SplitMethod.ParagraphWords}>
+            <div class="flex flex-row flex-wrap space-x-2 p-2 bg-blue-900 text-white">
+              <div class={"space-x-2"} hidden={settings().method == SplittingMethod.Paragraph || settings().method == SplittingMethod.ParagraphWords}>
                 <label>Tokens/Line:</label>
                 <input
                   value={settings().maxTokensPerLine}
                   onInput={(e) => setSettings({ ...settings(), maxTokensPerLine: e.currentTarget.value })}
                   class="w-20 px-1 text-black" type="text" />
               </div>
-              <div class="space-x-2" hidden={settings().method == SplitMethod.Paragraph || settings().method == SplitMethod.ParagraphWords}>
+              <div class="space-x-2" hidden={settings().method == SplittingMethod.Paragraph || settings().method == SplittingMethod.ParagraphWords}>
                 <label>Tokens/Paragraph:</label>
                 <input
                   value={settings().maxTokensPerParagraph}
                   onInput={(e) => setSettings({ ...settings(), maxTokensPerParagraph: e.currentTarget.value })}
                   class="w-20 px-1 text-black" type="text" />
               </div>
-              <div class="space-x-2" hidden={settings().method == SplitMethod.Paragraph || settings().method == SplitMethod.ParagraphWords}>
+              <div class="space-x-2" hidden={settings().method == SplittingMethod.Paragraph || settings().method == SplittingMethod.ParagraphWords}>
                 <label>Overlap Tokens:</label>
                 <input
                   value={settings().overlapTokens}
                   onInput={(e) => setSettings({ ...settings(), overlapTokens: e.currentTarget.value })}
                   class="w-20 px-1 text-black" type="text" />
               </div>
-              <div class="space-x-2" hidden={settings().method == SplitMethod.Paragraph || settings().method == SplitMethod.SK || settings().method == SplitMethod.SKTIKTOKEN}>
+              <div class="space-x-2" hidden={settings().method == SplittingMethod.Paragraph || settings().method == SplittingMethod.SK || settings().method == SplittingMethod.SKTIKTOKEN}>
                 <label>Word Count:</label>
                 <input
                   value={settings().wordCount}
@@ -248,87 +348,110 @@ function App() {
                   class="w-20 px-1 text-black" type="text" />
               </div>
             </div>
-          </div>
-          <button
-            onClick={Process}
-            class="w-20 p-2 bg-purple-950 hover:bg-purple-900 text-white font-semibold">Chunk</button>
-          <textarea
-            class="border border-black p-2 round-lg"
-            value={text()}
-            onInput={(e) => { getTokenCountAfterTyping(e.currentTarget.value, "chunk") }}
-            rows={10}></textarea>
-          <div>
-            <div class="bg-slate-900 p-1 text-white space-x-2">
-              <label class='font-bold uppercase'>Additional Context</label>
-              <span title="Total Tokens" class='px-2 bg-purple-900 text-white rounded-xl'>{tokensContext()}</span>
+            <div class="flex flex-col bg-white space-y-2 p-2">
+              <textarea
+                class="w-full border border-black p-2 round-lg mt-2"
+                value={text()}
+                onInput={(e) => { getTokenCountAfterTyping(e.currentTarget.value, "chunk") }}
+                rows={20}>
+              </textarea>
+              <div class="space-x-2">
+                <button
+                  onClick={Process}
+                  class="w-24 p-2 bg-blue-900 hover:bg-blue-900 text-white font-semibold">Chunk</button>
+                <button
+                  onClick={LoadAndProcess}
+                  class="p-2 bg-green-800 hover:bg-green-700 text-white font-semibold">Load Sample & Chunk</button>
+              </div>
+              <Information />
             </div>
-            <div class="bg-purple-900 p-1 text-white space-x-1">
-              <label class='font-bold uppercase'>Chunks:</label>
+          </section>
+          <section hidden={tab() !== "context"}>
+            <div class="bg-blue-900 p-1 text-white space-x-1">
+              <label class='uppercase'>Chunks:</label>
               <input class="px-1 w-10 text-black"
                 value={settings().chunks}
                 onInput={(e) => setSettings({ ...settings(), chunks: e.currentTarget.value })}
               />
             </div>
-          </div>
-          <button class="p-2 w-20 bg-purple-950 text-white">Load</button>
-          <textarea
-            class="border border-black p-2 round-lg"
-            value={context()}
-            onInput={(e) => getTokenCountAfterTyping(e.currentTarget.value, "context")}
-            rows={10}></textarea>
-          <div>
-            <div class="bg-slate-900 text-white p-1 space-x-2">
-              <label class='font-bold uppercase'>Prompt</label>
-              <span title="Total Tokens" class='px-2 bg-purple-900 text-white rounded-xl'>{tokensPrompt()}</span>
+            <div class="flex flex-col space-y-2 mt-2 p-2">
+              <textarea
+                class="border border-black p-2 round-lg"
+                value={context()}
+                onInput={(e) => getTokenCountAfterTyping(e.currentTarget.value, "context")}
+                rows={20}>
+              </textarea>
+              <button class="p-2 w-24 bg-blue-900 text-white"
+                onclick={LoadContext}
+              >Load</button>
             </div>
-            <div class="bg-purple-900 p-1 text-white space-x-1">
-              <label class='font-bold uppercase'>Max Tokens:</label>
-              <input class="w-20 px-1 text-black"
-                value={settings().max_tokens}
-                oninput={(e) => setSettings({ ...settings(), max_tokens: e.currentTarget.value })}
-              />
-              <label class='font-bold uppercase'>Temperature:</label>
-              <input class="w-20 px-1 text-black"
-                value={settings().temperature}
-                oninput={(e) => setSettings({ ...settings(), temperature: e.currentTarget.value })}
-              />
+          </section>
+          <section hidden={tab() !== "prompt"}>
+            <div>
+              <div class="bg-blue-900 p-1 text-white space-x-1">
+                <label class='uppercase'>Max Tokens:</label>
+                <input class="w-20 px-1 text-black"
+                  value={settings().max_tokens}
+                  oninput={(e) => setSettings({ ...settings(), max_tokens: e.currentTarget.value })}
+                />
+                <label class='uppercase'>Temperature:</label>
+                <input class="w-20 px-1 text-black"
+                  value={settings().temperature}
+                  oninput={(e) => setSettings({ ...settings(), temperature: e.currentTarget.value })}
+                />
+              </div>
             </div>
-          </div>
-          <button class="p-2 w-24 bg-purple-950 text-white"
-            onclick={Submit}
-          >{submitLabel()}</button>
-          <textarea
-            class="border border-black p-2 round-lg"
-            value={settings().prompt}
-            onInput={(e) => getTokenCountAfterTyping(e.currentTarget.value, "prompt")}
-            rows={5}></textarea>
-          <div class="bg-slate-900 p-1 text-white">
-            <label class='font-bold uppercase'>Completion</label>
-          </div>
-          <textarea
-            readOnly
-            value={completion()}
-            class="border bg-slate-200 border-black p-2 round-lg"
-            rows={10}></textarea>
-          {/* <button
-            onClick={Process}
-            class="w-20 p-2 bg-blue-800 hover:bg-blue-700 text-white font-semibold">Process</button> */}
+            <div class="flex flex-col space-y-2 mt-2 p-2">
+              <textarea
+                class="border border-black p-2 round-lg"
+                value={settings().prompt}
+                onInput={(e) => getTokenCountAfterTyping(e.currentTarget.value, "prompt")}
+                rows={20}>
+              </textarea>
+              <div class="p-2 bg-yellow-100">
+                <p><strong>Note: </strong>the additional context will be added automatically at the end of the Prompt. If you need to set a specific placement, use the &lt;CONTEXT&gt; placeholder. This placeholder will be replaced in the final Prompt at the specific location.</p>
+              </div>
+              <div class="space-x-2">
+                <button class="p-2 w-24 bg-blue-900 hover:bg-blue-700 text-white font-semibold"
+                  onclick={Submit}
+                >{submitLabel()}
+                </button>
+                <button class="p-2 bg-green-800 hover:bg-green-700 text-white font-semibold"
+                  onclick={LoadSamplePrompt}
+                >Sample Prompt
+                </button>
+              </div>
+            </div>
+          </section>
+          <section hidden={tab() !== "completion"}>
+            <div class="flex flex-col mt-2 space-y-2 p-2">
+              <textarea
+                readOnly
+                value={completion()}
+                class="border bg-slate-200 border-black p-2 round-lg"
+                rows={20}>
+              </textarea>
+            </div>
+          </section>
+          <section class="w-full md:w-1/4 px-2 space-y-2">
+
+          </section>
         </div>
-        <div class="flex flex-col w-full md:w-1/4 p-2 space-y-2">
-          <div class="space-x-2 bg-slate-900 text-white p-1">
-            <label class="font-bold uppercase">Output Chunks: </label> <span title="Total Chunks" class='px-2 bg-purple-900 text-white rounded-xl'>{parseCompletion().chunks.length}</span> -
-            <span title="Total Tokens" class='px-2 bg-purple-900 text-white rounded-xl'>{parseCompletion().chunks.reduce((acc, chunk) => acc + chunk.tokenCount, 0)}</span>
+        <div class="basis-full md:basis-1/4 px-2">
+          <div class="space-x-2 bg-blue-900 text-white p-1">
+            <label class="uppercase">Output Chunks: </label> <span title="Total Chunks" class='px-2 bg-slate-800 text-white rounded-xl'>{parseCompletion().chunks.length}</span> -
+            <span title="Total Tokens" class='px-2 bg-slate-800 text-white rounded-xl'>{parseCompletion().chunks.reduce((acc, chunk) => acc + chunk.tokenCount, 0)}</span>
           </div>
 
           <For each={parseCompletion().chunks}>
             {(chunk, idx) => (
-              <div class="flex flex-col rounded-lg p-2 space-y-3 border-2 border-slate-300 hover:border-2 hover:border-slate-800 shadow">
+              <div class="flex flex-col mb-2 rounded-lg p-2 space-y-3 border-2 border-slate-300 hover:border-2 hover:border-slate-800 shadow">
                 <div>
                   <span class="text-sm font-bold uppercase">Chunk: </span>{idx() + 1} <span class="text-sm font-bold uppercase">Tokens: </span>{chunk.tokenCount}
                 </div>
                 <hr class="border-black" />
                 {/* <span class="">{chunk.text}</span> */}
-                <textarea class="bg-slate-200 p-2" rows={6} value={chunk.text} readOnly></textarea>
+                <textarea class="bg-slate-200 p-2" rows={20} value={chunk.text} readOnly></textarea>
               </div>
             )}
           </For>

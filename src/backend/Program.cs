@@ -15,7 +15,8 @@ var api_model = Environment.GetEnvironmentVariable("OPENAI_API_GPT")!;
 
 Uri azureOpenAIResourceUri = new(api_URI);
 AzureKeyCredential azureOpenAIApiKey = new(api_key);
-OpenAIClient client = new(azureOpenAIResourceUri, azureOpenAIApiKey);
+OpenAIClient client;
+client = new(azureOpenAIResourceUri, azureOpenAIApiKey);
 
 // Add services to the container.
 builder.Services.AddControllers();
@@ -153,6 +154,24 @@ group.MapPost("/completion", async ([FromBody] CompletionRequest request) =>
 .WithName("PostCompletion")
 .WithOpenApi();
 
+
+group.MapPost("/reconfigure", ([FromBody] ReconfigureRequest request) =>
+{
+    if (string.IsNullOrEmpty(request.uri) || string.IsNullOrEmpty(request.key) || string.IsNullOrEmpty(request.model))
+    {
+        return Results.BadRequest(new { message = "URI, API Key, and model cannot be empty" });
+    }
+    client = new(new Uri(request.uri), new AzureKeyCredential(request.key));
+    api_model = request.model;
+
+    return Results.Ok();
+})
+.Produces<UrlFileResponse>(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status400BadRequest)
+.WithName("PostReconfigure")
+.WithOpenApi();
+
+
 //app.MapControllers();
 app.UseStaticFiles();
 app.MapFallbackToFile("index.html");
@@ -161,3 +180,4 @@ app.Run();
 
 record CompletionRequest(string prompt, int max_tokens = 500, float temperature = 0.3f);
 record CompletionResponse(string text);
+record ReconfigureRequest(string key, string uri, string model);
