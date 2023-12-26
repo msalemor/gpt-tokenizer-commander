@@ -24,6 +24,8 @@ UI:
 - SolidJS
 - SolidJS Primitives/Storage
 - Axios
+- gpt-tokenizer
+- Tailwind
 - Vite
 - Bun
 
@@ -32,6 +34,8 @@ Backend
 - C# SDK 8.0
 - Semantic Kernel
 - OpenAI SDK
+- Tiktoken
+- Dotenv.Net
 
 ## Running locally
 
