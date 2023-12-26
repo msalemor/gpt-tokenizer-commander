@@ -35,7 +35,8 @@ Backend
 
 ## Running locally
 
-- Create an `.env` file at the `src\backend` folder.
+- Create a `.env` file in the `src\backend` folder
+- At the project's root folder type: 'make run'
 
 ## Running from Docker
 
