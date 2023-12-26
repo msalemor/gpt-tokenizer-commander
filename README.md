@@ -5,14 +5,14 @@ This is a tool designed to help understand several foundational model concepts w
 - GPT Models
 - Tokens
 - Token limits
-- Prompt and completions
+- Prompts and completions
 - Chunking
 - Prompt Engineering
 - Added context to a prompt
 
 ## Chunking methods
 
-- Tokenizer: Use the SK splitter, but override the token counter with the tiktoken counter
+- Tokenizer: Use the SK splitter, but override the token counter with a tiktoken token counter
 - SK Default: Use the default SK splitter and counter
 - Paragraph: Break by paragraphs `\n\n`
 - Paragraph words: Break by paragraphs and words. Allow a chunk to be longer than the requested amount until the end of the next paragraph.
