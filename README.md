@@ -22,12 +22,14 @@ This is a tool designed to help understand several foundational model concepts w
 UI:
 
 - SolidJS
+- SolidJS Primitives/Storage
 - Axios
+- Vite
 - Bun
 
 Backend
 
-- C#
+- C# SDK 8.0
 - Semantic Kernel
 - OpenAI SDK
 
