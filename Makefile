@@ -7,7 +7,7 @@ clean:
 
 build-ui: clean
 	@echo "Build UI"
-	cd src/frontend && npm run build
+	cd src/frontend && bun run build
 	cp -r src/frontend/dist/* src/backend/wwwroot
 
 run: build-ui
