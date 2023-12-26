@@ -216,7 +216,6 @@ function App() {
       <Header />
 
       <div class="bg-blue-900 text-white p-2 flex flex-row flex-wrap space-x-2 space-y-2 items-center">
-
         <div class='space-x-2'>
           <label>OpenAI</label>
           <label>URI:</label>
