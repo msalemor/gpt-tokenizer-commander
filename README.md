@@ -38,7 +38,7 @@ Backend
 - Create a `.env` file in the `src\backend` folder
 - At the project's root folder type: 'make run'
 
-**Note:** The equivalent `Makefile` commands by hand are:
+**Note:** the equivalent `Makefile` commands by hand are:
 
 ```bash
 rm -rf src/backend/wwwroot
