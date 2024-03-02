@@ -1,4 +1,4 @@
-# GPT Tokenizer and Chunking Playground
+# GPT Tokenizer Commander
 
 This is a tool designed to help understand several foundational model concepts when building AI-infused applications with the OpenAI models. These concepts include:
 
